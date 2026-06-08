@@ -1,13 +1,10 @@
 use axum::middleware;
-use axum::serve::Listener;
 use axum::{Router, routing::get, routing::post};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use tokio::sync::{RwLock, broadcast};
-use tower_http::cors::CorsLayer;
-use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 // Local imports
@@ -16,20 +13,25 @@ use self_middlewares::timing_middleware;
 
 mod handlers;
 use handlers::{create_session, get_session, health, root, websocket_handler};
-#[derive(Clone)]
-struct Session {
-    users: Vec<String>,
+#[derive(Clone, Serialize, Deserialize)]
+pub struct User {
+    pub username: String,
 }
 
 #[derive(Clone)]
-struct SyncMessage {
-    text: String,
+pub struct Session {
+    pub users: HashMap<String, User>,
 }
 
 #[derive(Clone)]
-struct AppState {
-    sessions: Arc<RwLock<HashMap<String, Session>>>,
-    tx: broadcast::Sender<SyncMessage>,
+pub struct SyncMessage {
+    pub text: String,
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    pub sessions: Arc<RwLock<HashMap<String, Session>>>,
+    pub tx: broadcast::Sender<SyncMessage>,
 }
 
 #[tokio::main]

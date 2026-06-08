@@ -1,7 +1,6 @@
-use axum::{extract::Request, extract::State, middleware::Next, response::Response};
+use axum::{extract::Request, middleware::Next, response::Response};
 
-use crate::AppState;
-use std::{sync::atomic::Ordering, time::Instant};
+use std::time::Instant;
 
 pub async fn timing_middleware(req: Request, next: Next) -> Response {
     let start = Instant::now();
