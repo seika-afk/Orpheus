@@ -1,3 +1,4 @@
+use axum::extract::ws::WebSocketUpgrade;
 use axum::http::StatusCode;
 use axum::{
     Json,
@@ -67,4 +68,13 @@ pub async fn create_session(
         StatusCode::CREATED,
         Json(CreateSessionResponse { success: true }),
     )
+}
+
+pub async fn websocket_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) {
+
+    
 }
