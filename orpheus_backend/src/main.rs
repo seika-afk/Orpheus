@@ -25,9 +25,20 @@ pub struct Session {
     pub tx: broadcast::Sender<SyncMessage>,
 }
 
-#[derive(Clone)]
-pub struct SyncMessage {
-    pub text: String,
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SyncMessage {
+    UserJoined { username: String },
+    UserLeft { username: String },
+    PlaybackCommand(PlaybackCommand),
+    PlaybackSync { position: u64, playing: bool },
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub enum PlaybackCommand {
+    Play,
+    Pause,
+    Next,
+    Prev,
 }
 
 #[derive(Clone)]

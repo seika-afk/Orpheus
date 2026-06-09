@@ -134,18 +134,23 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
                 }
             };
 
-            let _ = tx.send(SyncMessage {
-                text: format!("{} has entered", join.username),
-            });
-
             let mut rx = tx.subscribe();
 
             let tx_for_recv = tx.clone();
+            let _ = tx.send(SyncMessage::UserJoined {
+                username: join.username.clone(),
+            });
 
             let mut send_task = tokio::spawn(async move {
                 while let Ok(msg) = rx.recv().await {
+                    let json = match serde_json::to_string(&msg) {
+                        Ok(json) => json,
+                        Err(_) => continue,
+                    };
+                    
+
                     if sender
-                        .send(ax_extract_ws::Message::Text(msg.text.into()))
+                        .send(ax_extract_ws::Message::Text(json.into()))
                         .await
                         .is_err()
                     {
@@ -156,16 +161,24 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
 
             let mut recv_task = tokio::spawn(async move {
                 while let Some(Ok(ax_extract_ws::Message::Text(text))) = receiver.next().await {
-                    let _ = tx_for_recv.send(SyncMessage {
-                        text: text.to_string(),
-                    });
+                    if let Ok(msg) = serde_json::from_str::<SyncMessage>(&text) {
+                        let _ = tx_for_recv.send(msg);
+                    }
                 }
             });
-
+            let username = join.username.clone();
+            let client_id = join.client_id.clone();
             tokio::select! {
                 _ = (&mut send_task) => recv_task.abort(),
                 _ = (&mut recv_task) => send_task.abort(),
             };
+            {
+                let mut sessions = state.sessions.write().await;
+                if let Some(session) = sessions.get_mut(&session_id) {
+                    session.users.remove(&client_id);
+                }
+            }
+            let _ = tx.send(SyncMessage::UserLeft { username });
         }
     }
 }
