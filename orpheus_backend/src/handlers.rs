@@ -1,19 +1,18 @@
-use axum::extract::ws::WebSocketUpgrade;
+use ax_extract_ws::{WebSocket, WebSocketUpgrade};
+use axum::extract::ws as ax_extract_ws;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::{
     Json,
     extract::{Path, State},
-    http,
 };
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use tokio::sync::broadcast;
 
-// /
-// /health
-// /sessions/:id
-// /sessions Post
+use crate::{AppState, Session, SyncMessage, User};
 
-use crate::{AppState, Session};
-//structs
 #[derive(Serialize)]
 pub struct HealthResponse {
     status: &'static str,
@@ -21,17 +20,27 @@ pub struct HealthResponse {
 
 #[derive(Serialize)]
 pub struct SessionResponse {
-    users: Vec<String>,
+    pub users: HashMap<String, User>,
 }
 
 #[derive(Deserialize)]
 pub struct CreateSessionRequest {
-    id: String,
+    pub id: String,
 }
+
 #[derive(Serialize)]
 pub struct CreateSessionResponse {
-    success: bool,
+    pub success: bool,
 }
+
+#[derive(Deserialize, Serialize)]
+pub struct JsonMessage {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub username: String,
+    pub client_id: String,
+}
+
 pub async fn root() -> &'static str {
     " Orpheus : Shared Music, Synchronized"
 }
@@ -63,7 +72,15 @@ pub async fn create_session(
             Json(CreateSessionResponse { success: false }),
         );
     }
-    session.insert(payload.id, Session { users: vec![] });
+    let (tx, _rx) = broadcast::channel::<SyncMessage>(100);
+    session.insert(
+        payload.id,
+        Session {
+            users: HashMap::new(),
+
+            tx: tx,
+        },
+    );
     (
         StatusCode::CREATED,
         Json(CreateSessionResponse { success: true }),
@@ -74,7 +91,81 @@ pub async fn websocket_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     Path(id): Path<String>,
-) {
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| websocket(socket, state, id))
+}
+pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
+    let (mut sender, mut receiver) = socket.split();
 
-    
+    if let Some(Ok(ax_extract_ws::Message::Text(text))) = receiver.next().await {
+        if let Ok(join) = serde_json::from_str::<JsonMessage>(&text) {
+            {
+                let mut sessions = state.sessions.write().await;
+
+                if let Some(session) = sessions.get_mut(&session_id) {
+                    session.users.insert(
+                        join.client_id.clone(),
+                        User {
+                            username: join.username.clone(),
+                        },
+                    );
+                } else {
+                    return;
+                }
+            }
+
+            let session_snap = {
+                let sessions = state.sessions.read().await;
+                sessions.get(&session_id).cloned()
+            };
+
+            if let Some(session) = session_snap {
+                let json = serde_json::to_string(&session).unwrap();
+
+                let _ = sender.send(ax_extract_ws::Message::Text(json.into())).await;
+            }
+
+            let tx = {
+                let sessions = state.sessions.read().await;
+
+                match sessions.get(&session_id) {
+                    Some(session) => session.tx.clone(),
+                    None => return,
+                }
+            };
+
+            let _ = tx.send(SyncMessage {
+                text: format!("{} has entered", join.username),
+            });
+
+            let mut rx = tx.subscribe();
+
+            let tx_for_recv = tx.clone();
+
+            let mut send_task = tokio::spawn(async move {
+                while let Ok(msg) = rx.recv().await {
+                    if sender
+                        .send(ax_extract_ws::Message::Text(msg.text.into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+
+            let mut recv_task = tokio::spawn(async move {
+                while let Some(Ok(ax_extract_ws::Message::Text(text))) = receiver.next().await {
+                    let _ = tx_for_recv.send(SyncMessage {
+                        text: text.to_string(),
+                    });
+                }
+            });
+
+            tokio::select! {
+                _ = (&mut send_task) => recv_task.abort(),
+                _ = (&mut recv_task) => send_task.abort(),
+            };
+        }
+    }
 }

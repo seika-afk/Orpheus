@@ -18,9 +18,11 @@ pub struct User {
     pub username: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct Session {
     pub users: HashMap<String, User>,
+    #[serde(skip)]
+    pub tx: broadcast::Sender<SyncMessage>,
 }
 
 #[derive(Clone)]
@@ -31,7 +33,6 @@ pub struct SyncMessage {
 #[derive(Clone)]
 pub struct AppState {
     pub sessions: Arc<RwLock<HashMap<String, Session>>>,
-    pub tx: broadcast::Sender<SyncMessage>,
 }
 
 #[tokio::main]
@@ -43,10 +44,8 @@ async fn main() {
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
-    let (tx_, _) = broadcast::channel::<SyncMessage>(100);
     let state = AppState {
         sessions: Arc::new(RwLock::new(HashMap::new())),
-        tx: tx_,
     };
 
     let app: Router = (Router::new()
