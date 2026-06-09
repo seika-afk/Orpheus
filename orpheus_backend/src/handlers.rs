@@ -139,15 +139,25 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
             let tx_for_recv = tx.clone();
             let _ = tx.send(SyncMessage::UserJoined {
                 username: join.username.clone(),
+                client_id: join.client_id.clone(),
             });
-
+            let id_ = join.client_id.clone();
             let mut send_task = tokio::spawn(async move {
                 while let Ok(msg) = rx.recv().await {
+                    let sender_id = match &msg {
+                        SyncMessage::UserJoined { client_id, .. } => client_id.clone(),
+                        SyncMessage::UserLeft { client_id, .. } => client_id.clone(),
+                        SyncMessage::PlaybackCommand { client_id, .. } => client_id.clone(),
+                        SyncMessage::PlaybackSync { client_id, .. } => client_id.clone(),
+                    };
+
+                    if sender_id == id_ {
+                        continue;
+                    }
                     let json = match serde_json::to_string(&msg) {
                         Ok(json) => json,
                         Err(_) => continue,
                     };
-                    
 
                     if sender
                         .send(ax_extract_ws::Message::Text(json.into()))
@@ -178,7 +188,19 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
                     session.users.remove(&client_id);
                 }
             }
-            let _ = tx.send(SyncMessage::UserLeft { username });
+            let _ = tx.send(SyncMessage::UserLeft {
+                username: username,
+                client_id: join.client_id.clone(),
+            });
+
+            {
+                let mut sessions = state.sessions.write().await;
+                if let Some(session) = sessions.get(&session_id) {
+                    if session.users.is_empty() {
+                        sessions.remove(&session_id);
+                    }
+                }
+            }
         }
     }
 }

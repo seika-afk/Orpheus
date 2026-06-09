@@ -1,5 +1,6 @@
 use axum::middleware;
 use axum::{Router, routing::get, routing::post};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -28,10 +29,23 @@ pub struct Session {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum SyncMessage {
-    UserJoined { username: String },
-    UserLeft { username: String },
-    PlaybackCommand(PlaybackCommand),
-    PlaybackSync { position: u64, playing: bool },
+    UserJoined {
+        username: String,
+        client_id: String,
+    },
+    UserLeft {
+        username: String,
+        client_id: String,
+    },
+    PlaybackCommand {
+        command: PlaybackCommand,
+        client_id: String,
+    },
+    PlaybackSync {
+        position: u64,
+        playing: bool,
+        client_id: String,
+    },
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub enum PlaybackCommand {
