@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
 
-use crate::{AppState, Session, SyncMessage, User};
+use crate::{AppState, PlaybackCmd, Session, SyncMessage, User};
 
 #[derive(Serialize)]
 pub struct HealthResponse {
@@ -77,7 +77,8 @@ pub async fn create_session(
         payload.id,
         Session {
             users: HashMap::new(),
-
+            queue: Vec::new(),
+            playing: false,
             tx: tx,
         },
     );
@@ -95,12 +96,13 @@ pub async fn websocket_handler(
     ws.on_upgrade(move |socket| websocket(socket, state, id))
 }
 pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
+    let sessions = state.sessions.clone();
     let (mut sender, mut receiver) = socket.split();
 
     if let Some(Ok(ax_extract_ws::Message::Text(text))) = receiver.next().await {
         if let Ok(join) = serde_json::from_str::<JsonMessage>(&text) {
             {
-                let mut sessions = state.sessions.write().await;
+                let mut sessions = sessions.write().await;
 
                 if let Some(session) = sessions.get_mut(&session_id) {
                     session.users.insert(
@@ -115,7 +117,7 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
             }
 
             let session_snap = {
-                let sessions = state.sessions.read().await;
+                let sessions = sessions.read().await;
                 sessions.get(&session_id).cloned()
             };
 
@@ -126,7 +128,7 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
             }
 
             let tx = {
-                let sessions = state.sessions.read().await;
+                let sessions = sessions.read().await;
 
                 match sessions.get(&session_id) {
                     Some(session) => session.tx.clone(),
@@ -147,8 +149,9 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
                     let sender_id = match &msg {
                         SyncMessage::UserJoined { client_id, .. } => client_id.clone(),
                         SyncMessage::UserLeft { client_id, .. } => client_id.clone(),
-                        SyncMessage::PlaybackCommand { client_id, .. } => client_id.clone(),
+                        SyncMessage::PlaybackCmds { client_id, .. } => client_id.clone(),
                         SyncMessage::PlaybackSync { client_id, .. } => client_id.clone(),
+                        SyncMessage::AddInQueue { client_id, .. } => client_id.clone(),
                     };
 
                     if sender_id == id_ {
@@ -169,9 +172,56 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
                 }
             });
 
+            let session_id = session_id.clone();
+            let sessions_for_recv = sessions.clone();
+            let session_id_for_recv = session_id.clone();
+
             let mut recv_task = tokio::spawn(async move {
                 while let Some(Ok(ax_extract_ws::Message::Text(text))) = receiver.next().await {
                     if let Ok(msg) = serde_json::from_str::<SyncMessage>(&text) {
+                        match &msg {
+                            SyncMessage::AddInQueue {
+                                songs,
+                                client_id: _,
+                            } => {
+                                println!("ADDING SONGS IN QUEUE");
+                                let mut session = sessions_for_recv.write().await;
+                                if let Some(session) = session.get_mut(&session_id_for_recv) {
+                                    for song in songs {
+                                        session.queue.push(song.clone());
+                                        println!("Added :: {}", song.name);
+                                    }
+                                }
+                            }
+                            SyncMessage::PlaybackCmds { command, client_id } => match command {
+                                PlaybackCmd::Play => {
+                                    println!("{client_id} pressed play");
+
+                                    let mut session = sessions_for_recv.write().await;
+                                    if let Some(session) = session.get_mut(&session_id_for_recv) {
+                                        session.playing = true;
+                                    }
+                                }
+
+                                PlaybackCmd::Pause => {
+                                    println!("{client_id} pressed pause");
+                                    let mut session = sessions_for_recv.write().await;
+                                    if let Some(session) = session.get_mut(&session_id_for_recv) {
+                                        session.playing = false;
+                                    }
+                                }
+
+                                PlaybackCmd::Next => {
+                                    println!("{client_id} pressed Next");
+                                }
+
+                                PlaybackCmd::Prev => {
+                                    println!("{client_id} pressed Prev");
+                                }
+                            },
+
+                            _ => {}
+                        }
                         let _ = tx_for_recv.send(msg);
                     }
                 }
@@ -183,7 +233,7 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
                 _ = (&mut recv_task) => send_task.abort(),
             };
             {
-                let mut sessions = state.sessions.write().await;
+                let mut sessions = sessions.write().await;
                 if let Some(session) = sessions.get_mut(&session_id) {
                     session.users.remove(&client_id);
                 }
@@ -194,7 +244,7 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
             });
 
             {
-                let mut sessions = state.sessions.write().await;
+                let mut sessions = sessions.write().await;
                 if let Some(session) = sessions.get(&session_id) {
                     if session.users.is_empty() {
                         sessions.remove(&session_id);

@@ -1,6 +1,5 @@
 use axum::middleware;
 use axum::{Router, routing::get, routing::post};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -19,9 +18,17 @@ pub struct User {
     pub username: String,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Song {
+    pub name: String,
+    pub url: String,
+    pub client_id: String,
+}
 #[derive(Clone, Serialize)]
 pub struct Session {
     pub users: HashMap<String, User>,
+    pub queue: Vec<Song>,
+    pub playing: bool,
     #[serde(skip)]
     pub tx: broadcast::Sender<SyncMessage>,
 }
@@ -37,8 +44,12 @@ pub enum SyncMessage {
         username: String,
         client_id: String,
     },
-    PlaybackCommand {
-        command: PlaybackCommand,
+    AddInQueue {
+        songs: Vec<Song>,
+        client_id: String,
+    },
+    PlaybackCmds {
+        command: PlaybackCmd,
         client_id: String,
     },
     PlaybackSync {
@@ -48,7 +59,7 @@ pub enum SyncMessage {
     },
 }
 #[derive(Clone, Serialize, Deserialize)]
-pub enum PlaybackCommand {
+pub enum PlaybackCmd {
     Play,
     Pause,
     Next,
