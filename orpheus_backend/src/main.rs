@@ -28,6 +28,10 @@ pub struct Song {
 pub struct Session {
     pub users: HashMap<String, User>,
     pub queue: Vec<Song>,
+    pub current_song_index: usize,
+    pub position_ms: u64,
+    #[serde(skip)]
+    pub position_updated_at_ms: u64,
     pub playing: bool,
     #[serde(skip)]
     pub tx: broadcast::Sender<SyncMessage>,
@@ -55,6 +59,9 @@ pub enum SyncMessage {
     PlaybackSync {
         position: u64,
         playing: bool,
+        client_id: String,
+    },
+    SongEnded {
         client_id: String,
     },
     UpdateQueue {
