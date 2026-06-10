@@ -57,6 +57,10 @@ pub enum SyncMessage {
         playing: bool,
         client_id: String,
     },
+    UpdateQueue {
+        songs: Vec<Song>,
+        client_id: String,
+    },
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub enum PlaybackCmd {

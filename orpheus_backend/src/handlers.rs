@@ -152,6 +152,7 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
                         SyncMessage::PlaybackCmds { client_id, .. } => client_id.clone(),
                         SyncMessage::PlaybackSync { client_id, .. } => client_id.clone(),
                         SyncMessage::AddInQueue { client_id, .. } => client_id.clone(),
+                        SyncMessage::UpdateQueue { client_id, .. } => client_id.clone(),
                     };
 
                     if sender_id == id_ {
@@ -180,10 +181,7 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
                 while let Some(Ok(ax_extract_ws::Message::Text(text))) = receiver.next().await {
                     if let Ok(msg) = serde_json::from_str::<SyncMessage>(&text) {
                         match &msg {
-                            SyncMessage::AddInQueue {
-                                songs,
-                                client_id: _,
-                            } => {
+                            SyncMessage::AddInQueue { songs, client_id } => {
                                 println!("ADDING SONGS IN QUEUE");
                                 let mut session = sessions_for_recv.write().await;
                                 if let Some(session) = session.get_mut(&session_id_for_recv) {
@@ -191,6 +189,11 @@ pub async fn websocket(socket: WebSocket, state: AppState, session_id: String) {
                                         session.queue.push(song.clone());
                                         println!("Added :: {}", song.name);
                                     }
+                                    let tex = SyncMessage::UpdateQueue {
+                                        songs: songs.clone(),
+                                        client_id: client_id.clone(),
+                                    };
+                                    let _ = tx_for_recv.send(tex);
                                 }
                             }
                             SyncMessage::PlaybackCmds { command, client_id } => match command {
