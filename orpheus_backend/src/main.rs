@@ -6,6 +6,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tower_http::cors::{CorsLayer, Any};
+
+use http::Method;
 
 // Local imports
 mod self_middlewares;
@@ -95,6 +98,10 @@ async fn main() {
         sessions: Arc::new(RwLock::new(HashMap::new())),
     };
 
+ let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(Any);
     let app: Router = (Router::new()
         .route("/", get(root))
         .route("/health", get(health))
@@ -102,6 +109,7 @@ async fn main() {
         .route("/sessions", post(create_session)))
     .route("/ws/sessions/{id}", get(websocket_handler))
     .layer(middleware::from_fn(timing_middleware))
+    .layer(cors)
     .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 4000));
